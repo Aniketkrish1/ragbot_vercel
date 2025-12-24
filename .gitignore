@@ -27,9 +27,8 @@ wheels/
 # Environment
 .env
 .venv
-
+.env.*
 # Vector store
-vectorstore/
 vectorstore.backup/
 
 # IDE

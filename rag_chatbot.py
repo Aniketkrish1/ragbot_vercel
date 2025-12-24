@@ -81,9 +81,9 @@ class RAGChatbot:
             max_tokens=config.LLM_MAX_TOKENS
         )
         
-        # Use window memory to maintain recent context (last 5 exchanges)
+        # Use window memory with reduced context (last 3 exchanges) to avoid token limits
         self.memory = ConversationBufferWindowMemory(
-            k=5,
+            k=3,  # Reduced from 5 to prevent exceeding Groq's 6000 token limit
             memory_key="chat_history",
             return_messages=True,
             output_key="answer"

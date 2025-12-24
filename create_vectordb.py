@@ -9,7 +9,7 @@ from typing import List
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFaceEndpointEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
 from config import config
@@ -76,11 +76,29 @@ def create_vectorstore_with_validation(chunks: List[Document]) -> FAISS:
     """Create and validate vector store."""
     print(f"🧮 Loading embeddings: {config.EMBEDDING_MODEL}")
     
-    embeddings = HuggingFaceEmbeddings(
-        model_name=config.EMBEDDING_MODEL,
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
+    if config.USE_HF_INFERENCE_API:
+        # Use HuggingFace Inference API (free tier, no local storage)
+        hf_token = os.getenv("HF_TOKEN")
+        if not hf_token:
+            print("\n❌ Error: HF_TOKEN not found in environment variables")
+            print("Get your free token at: https://huggingface.co/settings/tokens")
+            print("Add to .env file: HF_TOKEN=your_token_here")
+            print("\nOr set USE_HF_INFERENCE_API=False in config.py to use local model")
+            raise RuntimeError("HF_TOKEN required when USE_HF_INFERENCE_API=True")
+        
+        embeddings = HuggingFaceEndpointEmbeddings(
+            model=config.EMBEDDING_MODEL,
+            huggingfacehub_api_token=hf_token
+        )
+        print("✓ Using HuggingFace Inference API (free tier, no local storage needed)")
+    else:
+        # Use local model (requires ~80-90MB storage)
+        embeddings = HuggingFaceEmbeddings(
+            model_name=config.EMBEDDING_MODEL,
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+        print("✓ Using local embeddings model (~80-90MB)")
     
     print("📦 Creating FAISS vector store...")
     

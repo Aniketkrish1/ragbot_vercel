@@ -1,56 +1,96 @@
 # Production-Ready RAG Chatbot
 
-Context-aware, optimized RAG system for PDF documents using Groq LLM.
+Context-aware, optimized RAG system for PDF documents using Groq LLM. **Ready for Vercel deployment!**
 
 ## ✨ Features
 
-- **Context-Aware**: Maintains conversation history (last 5 exchanges)
+- **Context-Aware**: Maintains conversation history with Vercel KV session storage
 - **Optimized Performance**: Cached embeddings and vector store loading
-- **Production-Ready**: Error handling, validation, and backup mechanisms
-- **Clean UI**: Streamlit interface with source citations
+- **Production-Ready**: Deployed on Vercel serverless
+- **Clean API**: FastAPI backend with cookie-based sessions
 - **Configurable**: Centralized configuration in `config.py`
 
-## 🏗️ Architecture
+## 🚀 Quick Deploy to Vercel
+
+```bash
+# 1. Push to GitHub
+git add .
+git commit -m "ready for vercel deployment"
+git push origin main
+
+# 2. Go to vercel.com → Import GitHub repo
+# 3. Add env vars: GROQ_API_KEY, HF_TOKEN
+# 4. Deploy! (auto-configures Vercel KV)
+```
+
+See [DEPLOY-VERCEL.md](DEPLOY-VERCEL.md) for detailed instructions.
+
+## 🏗️ Project Structure
 
 ```
+├── api.py                 # FastAPI backend (main entry point)
 ├── config.py              # Centralized configuration
 ├── create_vectordb.py     # Vector database creation (run once)
 ├── rag_chatbot.py        # CLI chatbot interface
-├── app.py                # Streamlit web interface
+├── requirements-api.txt   # API dependencies (for Vercel)
+├── vercel.json           # Vercel configuration
 └── .env                  # Environment variables
 ```
 
-## 📦 Installation
+## 📦 Local Development
 
 ```powershell
 # Activate virtual environment
 .\rag\Scripts\Activate.ps1
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements-api.txt
 ```
 
-## 🚀 Usage
+## 🔌 API Endpoints
 
-### Step 1: Create Vector Database
+**Base URL:** `https://your-project.vercel.app`
+
+### Health Check
+```bash
+GET /health
+```
+
+### Chat
+```bash
+POST /api/chat
+Content-Type: application/json
+
+{
+  "prompt": "Your question here"
+}
+```
+
+Response includes answer, sources, and session ID.
+
+## 🚀 Local Testing
+
+### 1. Create Vector Database
 ```powershell
 python create_vectordb.py
 ```
 
-This will:
-- Find your PDF file
-- Create optimized chunks (800 chars, 150 overlap)
-- Build FAISS vector store
-- Validate and save with backup
-
-### Step 2: Run Chatbot
-
-**Web Interface (Recommended):**
+### 2. Run API Locally
 ```powershell
-streamlit run app.py
+# Start dev server
+uvicorn api:app --reload
 ```
 
-**Terminal Interface:**
+Visit: `http://localhost:8000/docs` for interactive API docs
+
+### 3. Test Chat Endpoint
+```powershell
+curl -X POST http://localhost:8000/api/chat `
+  -H "Content-Type: application/json" `
+  -d '{"prompt": "What is leadership?"}'
+```
+
+### CLI Testing (Original)
 ```powershell
 python rag_chatbot.py
 ```
@@ -86,8 +126,11 @@ LLM_MAX_TOKENS = 1024         # Maximum response length
 
 Required in `.env`:
 ```env
-GROQ_API_KEY=your_groq_api_key_here
+GROQ_API_KEY=your_groq_api_key
+HF_TOKEN=your_huggingface_token
 ```
+
+**Vercel Setup:** Add these in project **Settings → Environment Variables**
 
 ## 📊 Performance Tips
 
@@ -95,15 +138,20 @@ GROQ_API_KEY=your_groq_api_key_here
 - Lower `LLM_TEMPERATURE` for more focused answers
 - Increase `CHUNK_SIZE` for longer context per chunk
 
-## 🛡️ Production Features
+## 🛡️ Deployment Features
 
-- ✅ Input validation
-- ✅ Error recovery
-- ✅ Automatic backups
-- ✅ Context window management
-- ✅ Source attribution
-- ✅ Empty page filtering
-- ✅ Small chunk filtering (>50 chars)
+**On Vercel:**
+- ✅ Serverless FastAPI backend
+- ✅ Vercel KV for session storage (Redis)
+- ✅ Cookie-based session management
+- ✅ Automatic HTTPS
+- ✅ Cold start < 2 seconds
+- ✅ Auto-scaling (10K free KV commands/month)
+
+**Local Development:**
+- ✅ In-memory session fallback
+- ✅ Full compatibility
+- ✅ Interactive API docs at `/docs`
 
 ## 📄 License
 

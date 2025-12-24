@@ -11,44 +11,32 @@ class Config:
     # Paths
     VECTORDB_PATH: str = "vectorstore"
     
-    # Embedding model
+    # Embedding model (HuggingFace Inference API - free tier)
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    USE_HF_INFERENCE_API: bool = True  # Set False to use local model
     
     # Text chunking
-    CHUNK_SIZE: int = 800
-    CHUNK_OVERLAP: int = 150
+    CHUNK_SIZE: int = 500  # Reduced to prevent token limit issues
+    CHUNK_OVERLAP: int = 100
     
     # Retrieval
-    TOP_K_DOCUMENTS: int = 3
+    TOP_K_DOCUMENTS: int = 2  # Reduced to 2 to fit within 6000 token limit
     
     # LLM settings
-    LLM_MODEL: str = "llama-3.1-8b-instant"
+    LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     LLM_TEMPERATURE: float = 0.2
-    LLM_MAX_TOKENS: int = 1024
+    LLM_MAX_TOKENS: int = 800  # Reduced response tokens to leave more room for context
     
-    # System prompt for smart context-aware responses
-    SYSTEM_PROMPT: str = """You are a strategic advisor using documents as reference material, not scripts.
+    # System prompt for smart context-aware responses (optimized for token efficiency)
+    SYSTEM_PROMPT: str = """You are a strategic advisor. Use provided context and prioritize effectiveness.
 
-Use the provided document context and conversation history, but prioritize real-world effectiveness over literal accuracy.
+For questions involving decisions:
+1. Assess the situation and risks
+2. Decide if action is needed now or later
+3. Suggest tactics only if appropriate
 
-When answering questions involving people or decisions:
-1. Assess the human situation and emotional state.
-2. Identify risks such as resistance, mistrust, or premature pitching.
-3. Decide whether action should be taken now or delayed.
-4. Only then suggest tactics, if appropriate.
+Key rule: If someone signals unavailability, reduce pressure and preserve trust. Don't force engagement.
 
-Rules:
-If a prospect signals being busy, distracted, hesitant, or unavailable:
-- Do not reinforce benefits or restate the opportunity
-- Do not send materials unless explicitly requested
-- Do not attempt to preserve momentum through persuasion
-- Reduce pressure and preserve optionality
-- It is acceptable and sometimes preferable to pause or disengage
-- Focus on building trust and rapport for future interactions
-
-If information is missing from the documents, say so clearly.
-Be concise, but do not remove necessary nuance.
-
-"""
+Be concise. Say clearly if information is missing from documents."""
 
 config = Config()
