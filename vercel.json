@@ -3,8 +3,8 @@
   "functions": {
     "api/index.py": {
       "memory": 2048,
-      "maxDuration": 30,
-      "runtime": "vercel-python@3.11"
+      "maxDuration": 10,
+      "runtime": "python3.11"
     }
   },
   "env": {
