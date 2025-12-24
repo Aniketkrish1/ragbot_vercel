@@ -1,21 +1,19 @@
-# Core dependencies
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+python-multipart==0.0.20
+
+# LangChain & LLM
 langchain==0.3.7
-langchain-community==0.3.7
 langchain-groq==0.2.1
 langchain-huggingface==0.1.2
+langchain-community==0.3.7
 
-# Vector store and embeddings
+# Vector Store & Embeddings
 faiss-cpu==1.9.0.post1
 sentence-transformers==3.3.0
+huggingface_hub>=0.20.0
 
-# PDF processing
-pypdf==5.1.0
-
-# Environment and utilities
+# Environment
 python-dotenv==1.0.1
-
-# Web UI (optional)
-streamlit==1.40.1
-
-# Performance optimization
-cachetools==5.5.0
+requests>=2.31.0

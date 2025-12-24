@@ -15,7 +15,9 @@ from fastapi import FastAPI, HTTPException, Cookie, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from langchain_huggingface import HuggingFaceEmbeddings, HuggingFaceEndpointEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
+from huggingface_hub import InferenceClient
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain.chains import ConversationalRetrievalChain
@@ -34,6 +36,9 @@ from config import config
 
 # Load environment variables
 load_dotenv()
+
+# Fix OpenMP library conflict warning
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -65,6 +70,113 @@ last_cleanup = time.time()
 _vectorstore = None
 _embeddings = None
 _llm = None
+
+
+# ============================================
+# Custom HuggingFace API Embeddings Wrapper
+# ============================================
+
+class HuggingFaceAPIEmbeddings(Embeddings):
+    """Custom embeddings class using HuggingFace Inference API"""
+    
+    def __init__(self, model_name: str, api_key: str):
+        from huggingface_hub import InferenceClient
+        import numpy as np
+        
+        self.model_name = model_name
+        self.api_key = api_key
+        self.client = InferenceClient(token=api_key)
+        self.np = np
+    
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed a list of documents"""
+        embeddings = []
+        for text in texts:
+            embedding = self._embed_single(text)
+            embeddings.append(embedding)
+        return embeddings
+    
+    def embed_query(self, text: str) -> list[float]:
+        """Embed a single query"""
+        return self._embed_single(text)
+    
+    def _embed_single(self, text: str) -> list[float]:
+        """Helper method to embed a single text using InferenceClient"""
+        import time
+        
+        max_retries = 3
+        retry_attempt = 0
+        
+        while retry_attempt < max_retries:
+            try:
+                # Use feature_extraction which works with the router endpoint
+                result = self.client.feature_extraction(
+                    text=text,
+                    model=self.model_name
+                )
+                
+                # Parse the result
+                embedding = self._parse_embedding(result)
+                
+                # Validate dimensions
+                if len(embedding) == 0:
+                    raise ValueError("Received empty embedding vector")
+                
+                return embedding
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                
+                # Handle model loading
+                if "loading" in error_str or "503" in error_str:
+                    print(f"Model loading, waiting 20s...")
+                    time.sleep(20)
+                    continue  # Don't increment retry
+                
+                # Handle rate limiting
+                if "429" in error_str or "rate" in error_str:
+                    wait_time = min(2 ** retry_attempt, 30)
+                    print(f"Rate limited, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    retry_attempt += 1
+                    continue
+                
+                # Other errors
+                retry_attempt += 1
+                if retry_attempt >= max_retries:
+                    raise RuntimeError(
+                        f"HuggingFace API error after {max_retries} attempts: {str(e)}"
+                    )
+                time.sleep(2 ** retry_attempt)
+        
+        raise RuntimeError("Failed to get embeddings from HuggingFace API")
+    
+    def _parse_embedding(self, result) -> list[float]:
+        """Parse API response to extract embedding vector"""
+        # Handle numpy array
+        if isinstance(result, self.np.ndarray):
+            # If 2D array, flatten or take first row
+            if result.ndim == 2:
+                return result[0].tolist() if result.shape[0] > 0 else result.flatten().tolist()
+            return result.tolist()
+        
+        # Handle list formats
+        if isinstance(result, list):
+            if len(result) == 0:
+                return []
+            
+            # Nested list [[embedding]] -> [embedding]
+            if isinstance(result[0], list):
+                return result[0]
+            
+            # Already flat list [embedding]
+            if isinstance(result[0], (int, float)):
+                return result
+        
+        # Fallback: try to convert to list
+        return list(result) if result else []
+
+
 
 
 # ============================================
@@ -217,9 +329,9 @@ def load_embeddings():
             print("Warning: HF_TOKEN not found. Set USE_HF_INFERENCE_API=False in config.py to use local model.")
             raise RuntimeError("HF_TOKEN required when USE_HF_INFERENCE_API=True")
         
-        embeddings = HuggingFaceEndpointEmbeddings(
-            model=config.EMBEDDING_MODEL,
-            huggingfacehub_api_token=hf_token
+        embeddings = HuggingFaceAPIEmbeddings(
+            model_name=config.EMBEDDING_MODEL,
+            api_key=hf_token
         )
         print("Embeddings loaded via HuggingFace API (no local storage)")
     else:

@@ -13,7 +13,7 @@ class Config:
     
     # Embedding model (HuggingFace Inference API - free tier)
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
-    USE_HF_INFERENCE_API: bool = True  # Set False to use local model
+    USE_HF_INFERENCE_API: bool = True  # Using HF API to avoid local storage
     
     # Text chunking
     CHUNK_SIZE: int = 500  # Reduced to prevent token limit issues
