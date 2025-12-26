@@ -17,3 +17,6 @@ huggingface_hub>=0.20.0
 # Environment
 python-dotenv==1.0.1
 requests>=2.31.0
+
+# Production Server
+gunicorn==21.2.0
