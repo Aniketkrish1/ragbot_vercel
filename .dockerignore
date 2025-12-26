@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+rag/
+.env
+.env.*
+
+.git/
+.gitignore
+
+vectorstore.backup/
+
+.vscode/
+.DS_Store
