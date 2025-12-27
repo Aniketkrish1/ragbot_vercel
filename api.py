@@ -1,8 +1,4 @@
-"""
-FastAPI Backend for RAG Chatbot
-Provides REST API endpoints for context-aware PDF question answering
-"""
-
+# ... (Imports)
 import os
 import uuid
 import time
@@ -11,7 +7,7 @@ import json
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Cookie, Response
+from fastapi import FastAPI, HTTPException, Cookie, Response, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -24,14 +20,6 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
-
-# Vercel KV support
-try:
-    import vercel_kv
-    VERCEL_KV_AVAILABLE = True
-except ImportError:
-    VERCEL_KV_AVAILABLE = False
-
 from config import config
 
 # Load environment variables
@@ -43,30 +31,20 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 # Initialize FastAPI app
 app = FastAPI(
     title="RAG Chatbot API",
-    description="Context-aware PDF Question Answering with Groq LLM",
-    version="1.0.0"
+    description="Stateless Context-aware PDF Question Answering with Groq LLM",
+    version="2.0.0"
 )
 
 # CORS Configuration
-# For development: allows all origins
-# For production: replace "*" with your specific frontend domain
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to ["https://yourdomain.com"] in production
-    allow_credentials=True,  # Required for cookies
+    allow_origins=["*"], 
+    allow_credentials=True, 
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Session storage (uses Vercel KV on Vercel, falls back to in-memory)
-sessions: Dict[str, Dict] = {}
-
-# Session configuration
-SESSION_TIMEOUT = 3600  # 1 hour in seconds
-CLEANUP_INTERVAL = 300  # Clean old sessions every 5 minutes
-last_cleanup = time.time()
-
-# Cache for loaded models (load once, reuse)
+# Cache for loaded models
 _vectorstore = None
 _embeddings = None
 _llm = None
@@ -177,14 +155,16 @@ class HuggingFaceAPIEmbeddings(Embeddings):
         return list(result) if result else []
 
 
-
-
 # ============================================
 # Request/Response Models
 # ============================================
 
+
 class ChatRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=1000, description="User question")
+    user_id: str = Field(..., description="Unique User ID from frontend")
+    session_id: Optional[str] = Field(default=None, description="Check for Stateless Session")
+    history: List[str] = Field(default=[], description="REQUIRED: Chat history [Human, AI, Human, AI...]")
     temperature: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="LLM temperature")
     k_documents: Optional[int] = Field(default=None, ge=1, le=10, description="Number of context documents")
 
@@ -198,119 +178,11 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[SourceDocument]
     session_id: str
-    memory_status: Dict[str, Any]
 
 
 class HealthResponse(BaseModel):
     status: str
     vectorstore_loaded: bool
-    active_sessions: int
-
-
-# ============================================
-# Session Management
-# ============================================
-
-def get_session_data(session_id: str) -> Optional[Dict]:
-    """Get session data from Vercel KV or in-memory storage"""
-    if VERCEL_KV_AVAILABLE:
-        try:
-            data = vercel_kv.get(f"session:{session_id}")
-            if data:
-                return json.loads(data) if isinstance(data, str) else data
-        except Exception as e:
-            print(f"Error reading from Vercel KV: {e}")
-    
-    # Fallback to in-memory
-    return sessions.get(session_id)
-
-
-def set_session_data(session_id: str, data: Dict):
-    """Save session data to Vercel KV or in-memory storage"""
-    if VERCEL_KV_AVAILABLE:
-        try:
-            vercel_kv.set(f"session:{session_id}", json.dumps(data), ex=SESSION_TIMEOUT)
-            return
-        except Exception as e:
-            print(f"Error writing to Vercel KV: {e}")
-    
-    # Fallback to in-memory
-    sessions[session_id] = data
-
-
-def delete_session_data(session_id: str):
-    """Delete session data from Vercel KV or in-memory storage"""
-    if VERCEL_KV_AVAILABLE:
-        try:
-            vercel_kv.delete(f"session:{session_id}")
-            return
-        except Exception as e:
-            print(f"Error deleting from Vercel KV: {e}")
-    
-    # Fallback to in-memory
-    if session_id in sessions:
-        del sessions[session_id]
-
-
-def cleanup_old_sessions():
-    """Remove sessions that haven't been accessed in SESSION_TIMEOUT seconds"""
-    global last_cleanup
-    
-    current_time = time.time()
-    if current_time - last_cleanup < CLEANUP_INTERVAL:
-        return
-    
-    last_cleanup = current_time
-    
-    # Only cleanup in-memory sessions (Vercel KV handles expiry automatically)
-    expired_sessions = [
-        sid for sid, data in sessions.items()
-        if current_time - data.get("last_access", 0) > SESSION_TIMEOUT
-    ]
-    
-    for sid in expired_sessions:
-        del sessions[sid]
-    
-    if expired_sessions:
-        print(f"Cleaned up {len(expired_sessions)} expired sessions")
-
-
-def get_or_create_session(session_id: Optional[str]) -> str:
-    """Get existing session or create new one"""
-    cleanup_old_sessions()
-    
-    if session_id:
-        session_data = get_session_data(session_id)
-        if session_data:
-            session_data["last_access"] = time.time()
-            set_session_data(session_id, session_data)
-            return session_id
-    
-    # Create new session
-    new_session_id = str(uuid.uuid4())
-    set_session_data(new_session_id, {
-        "history": [],
-        "last_access": time.time(),
-        "created_at": datetime.utcnow().isoformat()
-    })
-    return new_session_id
-
-
-def get_session_history(session_id: str) -> List[str]:
-    """Get chat history for session"""
-    session_data = get_session_data(session_id)
-    if session_data:
-        return session_data.get("history", [])
-    return []
-
-
-def save_to_session(session_id: str, user_msg: str, ai_msg: str):
-    """Save messages to session history"""
-    session_data = get_session_data(session_id)
-    if session_data:
-        session_data["history"].extend([user_msg, ai_msg])
-        session_data["last_access"] = time.time()
-        set_session_data(session_id, session_data)
 
 
 # ============================================
@@ -391,78 +263,93 @@ def estimate_tokens(text: str) -> int:
 
 
 def create_rag_chain(vectorstore, temperature: float, k_docs: int, session_history: List[str]):
-    """Create conversational retrieval chain with memory"""
+    """
+    Create sophisticated RAG chain with:
+    1. Query Rewriting (History Aware Retriever)
+    2. MMR Search (Maximal Marginal Relevance) for better context
+    3. Proper Answer Generation
+    """
     
-    # Trim history if it's too long (safety check for token limits)
+    # Trim history to keep it manageable (Last 6 messages = 3 turns)
     estimated_history_tokens = estimate_tokens(" ".join(session_history))
-    if estimated_history_tokens > 1000:  # If history exceeds 1000 tokens
-        # Keep only the most recent messages
-        session_history = session_history[-6:]  # Last 3 exchanges (user + AI)
-        print(f"Trimmed conversation history to prevent token limit issues")
+    if estimated_history_tokens > 2000:
+        session_history = session_history[-6:]
     
     # Initialize LLM
     llm = get_llm(temperature)
     
-    # Create memory with aggressive token optimization to avoid 413 errors
-    memory = ConversationSummaryBufferMemory(
-        llm=llm,
-        max_token_limit=800,  # Reduced from 1500 to fit within Groq's 6000 token limit
-        memory_key="chat_history",
-        return_messages=True,
-        output_key="answer"
-    )
-    
-    # Restore chat history from session
-    for i in range(0, len(session_history), 2):
-        if i + 1 < len(session_history):
-            memory.chat_memory.add_user_message(session_history[i])
-            memory.chat_memory.add_ai_message(session_history[i + 1])
-    
-    # Create custom prompt
-    qa_prompt = PromptTemplate(
-        input_variables=["context", "question"],
-        template=f"{config.SYSTEM_PROMPT}\n\nContext from documents:\n{{context}}\n\nQuestion: {{question}}\n\nAnswer:"
-    )
-    
-    # Create retrieval chain
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": k_docs}
-        ),
-        memory=memory,
-        return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": qa_prompt},
-        verbose=False,
-        max_tokens_limit=config.LLM_MAX_TOKENS
-    )
-    
-    return chain, memory
-
-
-def get_memory_stats(memory) -> Dict:
-    """Extract memory statistics"""
-    try:
-        buffer_messages = memory.chat_memory.messages if hasattr(memory.chat_memory, 'messages') else []
-        buffer_count = len(buffer_messages)
-        has_summary = hasattr(memory, 'moving_summary_buffer') and memory.moving_summary_buffer
-        
-        total_tokens = 0
-        if buffer_messages:
-            try:
-                total_tokens = memory.llm.get_num_tokens(str(memory.load_memory_variables({})))
-            except:
-                pass
-        
-        return {
-            "messages_in_memory": buffer_count,
-            "has_summary": has_summary,
-            "tokens_used": total_tokens
+    # 1. Define the Retriever with MMR (Better diversity than standard similarity)
+    retriever = vectorstore.as_retriever(
+        search_type="mmr", 
+        search_kwargs={
+            "k": k_docs,
+            "lambda_mult": 0.7 
         }
-    except Exception as e:
-        print(f"Warning: Failed to get memory stats: {e}")
-        return {"messages_in_memory": 0, "has_summary": False, "tokens_used": 0}
+    )
+    
+    # 2. Memory / History Management
+    from langchain_core.messages import HumanMessage, AIMessage
+    chat_history = []
+    
+    # Simple parser: Assumes strings come in as Raw text, or formatted "Human: ..."
+    # We'll just take them as alternating turns if not prefixed, or parse prefix if present.
+    # For robustness in this simple version, we assume the frontend sends simple strings 
+    # OR we just blindly alternate. The safest for custom history arrays is blindly alternate 
+    # assuming Trusted Frontend.
+    
+    # Logic: Even indices are Human, Odd are AI
+    for i in range(len(session_history)):
+        msg = session_history[i]
+        # Cleanup prefixes if frontend sends "Human: hello"
+        clean_msg = msg.replace("Human: ", "").replace("AI: ", "")
+        
+        if i % 2 == 0:
+            chat_history.append(HumanMessage(content=clean_msg))
+        else:
+            chat_history.append(AIMessage(content=clean_msg))
+    
+    # 3. Create History-Aware Retriever (The "Rewrite" Step)
+    from langchain.chains import create_history_aware_retriever
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question "
+        "which might reference context in the chat history, "
+        "formulate a standalone question which can be understood "
+        "without the chat history. Do NOT answer the question, "
+        "just reformulate it if needed and otherwise return it as is."
+    )
+    
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", contextualize_q_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+    
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
+    )
+    
+    # 4. Create QA Chain (The "Answer" Step)
+    from langchain.chains.combine_documents import create_stuff_documents_chain
+    from langchain.chains import create_retrieval_chain
+    
+    qa_system_prompt = (
+        f"{config.SYSTEM_PROMPT}\n\n"
+        "Context from documents:\n{context}\n\n"
+        "If the answer is not in the context, say you don't know."
+    )
+    
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", qa_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+    
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+    
+    return rag_chain, chat_history
 
 
 # ============================================
@@ -473,7 +360,7 @@ def get_memory_stats(memory) -> Dict:
 async def startup_event():
     """Load models on startup"""
     print("=" * 50)
-    print("Starting RAG Chatbot API")
+    print("Starting RAG Chatbot API (Stateless)")
     print("=" * 50)
     try:
         load_vectorstore()
@@ -488,8 +375,7 @@ async def root():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "vectorstore_loaded": _vectorstore is not None,
-        "active_sessions": len(sessions)
+        "vectorstore_loaded": _vectorstore is not None
     }
 
 
@@ -498,87 +384,66 @@ async def health_check():
     """Detailed health check"""
     return {
         "status": "healthy",
-        "vectorstore_loaded": _vectorstore is not None,
-        "active_sessions": len(sessions)
+        "vectorstore_loaded": _vectorstore is not None
     }
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest,
-    response: Response,
-    session_id: Optional[str] = Cookie(None)
-):
+async def chat(request: ChatRequest):
     """
-    Main chat endpoint - accepts prompt, returns context-aware answer
-    
-    - Automatically manages sessions via cookies
-    - Maintains conversation context
-    - Returns answer with source documents
+    Stateless Chat Endpoint
+    - Accepts `history` list (managed by frontend).
+    - Returns answer based on docs + history context.
+    - No DB persistence on this server.
     """
     try:
         # Load vectorstore
         vectorstore = load_vectorstore()
         
-        # Get or create session
-        session_id = get_or_create_session(session_id)
-        
-        # Set session cookie
-        response.set_cookie(
-            key="session_id",
-            value=session_id,
-            max_age=SESSION_TIMEOUT,
-            httponly=True,
-            samesite="lax",
-            secure=False  # Set to True in production with HTTPS
-        )
-        
-        # Get session history
-        history = get_session_history(session_id)
+        # Use history directly from request
+        history = request.history
         
         # Use request params or defaults
         temperature = request.temperature if request.temperature is not None else config.LLM_TEMPERATURE
         k_docs = request.k_documents if request.k_documents is not None else config.TOP_K_DOCUMENTS
         
         # Create RAG chain with context
-        chain, memory = create_rag_chain(vectorstore, temperature, k_docs, history)
+        rag_chain, chat_history_objs = create_rag_chain(vectorstore, temperature, k_docs, history)
         
-        # Process query with retry logic for token limit errors
+        # Process query
         try:
-            result = chain.invoke({"question": request.prompt})
+            result = rag_chain.invoke({
+                "input": request.prompt,
+                "chat_history": chat_history_objs
+            })
         except Exception as e:
             error_str = str(e)
-            # Check if it's a token limit error
-            if "413" in error_str or "rate_limit_exceeded" in error_str or "Request too large" in error_str:
-                print(f"Token limit exceeded, retrying with reduced context...")
-                # Retry with minimal context
-                chain, memory = create_rag_chain(vectorstore, temperature, 1, [])  # Only 1 doc, no history
-                result = chain.invoke({"question": request.prompt})
+            # Fallback for minor token issues
+            if "413" in error_str or "rate_limit_exceeded" in error_str:
+                print(f"Warning: Token limit hit, retrying with zero context...")
+                rag_chain_min, _ = create_rag_chain(vectorstore, temperature, 1, [])
+                result = rag_chain_min.invoke({
+                    "input": request.prompt,
+                    "chat_history": []
+                })
             else:
                 raise
         
         answer = result["answer"]
-        source_docs = result.get("source_documents", [])
+        source_docs = result.get("context", [])
         
-        # Save to session
-        save_to_session(session_id, request.prompt, answer)
-        
-        # Format sources - aggressively truncate to reduce token usage
+        # Format sources
         sources = []
-        for doc in source_docs[:2]:  # Limit to first 2 sources only
+        for doc in source_docs[:2]:
             sources.append({
                 "page": doc.metadata.get("page", 0),
-                "content": doc.page_content[:150]  # Further reduced truncation
+                "content": doc.page_content[:150]
             })
-        
-        # Get memory stats
-        memory_status = get_memory_stats(memory)
         
         return {
             "answer": answer,
             "sources": sources,
-            "session_id": session_id,
-            "memory_status": memory_status
+            "session_id": "stateless",
         }
         
     except Exception as e:
@@ -586,52 +451,9 @@ async def chat(
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
 
-@app.post("/api/clear-session")
-async def clear_session(
-    response: Response,
-    session_id: Optional[str] = Cookie(None)
-):
-    """Clear conversation history for current session"""
-    if session_id and session_id in sessions:
-        sessions[session_id]["history"] = []
-        sessions[session_id]["last_access"] = time.time()
-        return {"message": "Session cleared successfully", "session_id": session_id}
-    
-    return {"message": "No active session found"}
-
-
-@app.get("/api/stats")
-async def get_stats():
-    """Get API statistics"""
-    return {
-        "active_sessions": len(sessions),
-        "vectorstore_loaded": _vectorstore is not None,
-        "sessions": {
-            sid: {
-                "message_count": len(data["history"]),
-                "last_access": datetime.fromtimestamp(data["last_access"]).isoformat(),
-                "created_at": data.get("created_at", "unknown")
-            }
-            for sid, data in sessions.items()
-        }
-    }
-
-
-# ============================================
-# Run Server (for local development)
-# ============================================
-
 if __name__ == "__main__":
     import uvicorn
-    
     print("\n" + "=" * 50)
     print("Starting FastAPI server on http://localhost:8000")
-    print("API Docs: http://localhost:8000/docs")
     print("=" * 50 + "\n")
-    
-    uvicorn.run(
-        "api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True  # Auto-reload on code changes
-    )
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

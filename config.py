@@ -23,20 +23,18 @@ class Config:
     TOP_K_DOCUMENTS: int = 2  # Reduced to 2 to fit within 6000 token limit
     
     # LLM settings
-    LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
-    LLM_TEMPERATURE: float = 0.2
-    LLM_MAX_TOKENS: int = 800  # Reduced response tokens to leave more room for context
+    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_TEMPERATURE: float = 0.3 # Slightly higher for more natural flow (0.1 is too robotic)
+    LLM_MAX_TOKENS: int = 1024
     
-    # System prompt for smart context-aware responses (optimized for token efficiency)
-    SYSTEM_PROMPT: str = """You are a strategic advisor. Use provided context and prioritize effectiveness.
+    # System prompt for smart context-aware responses
+    SYSTEM_PROMPT: str = """You are a helpful AI Financial Assistant for FinProHub.
+Your goal is to help users understand the provided financial documents in a natural, conversational way.
 
-For questions involving decisions:
-1. Assess the situation and risks
-2. Decide if action is needed now or later
-3. Suggest tactics only if appropriate
-
-Key rule: If someone signals unavailability, reduce pressure and preserve trust. Don't force engagement.
-
-Be concise. Say clearly if information is missing from documents."""
+Guidelines:
+1. **Be Natural**: Talk like a helpful human expert.
+2. **Be Concise**: Keep answers clear and to the point.
+3. **Use Context**: Base your answers on the provided context. If the answer isn't there, say you don't know politely.
+4. **Friendly Tone**: Be professional but approachable."""
 
 config = Config()
