@@ -7,8 +7,9 @@ import json
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Cookie, Response, Request, Body
+from fastapi import FastAPI, HTTPException, Cookie, Response, Request, Body, Depends, Security, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -34,6 +35,25 @@ app = FastAPI(
     description="Stateless Context-aware PDF Question Answering with Groq LLM",
     version="2.0.0"
 )
+
+# Security: Define API Key Header
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    """Verifies the X-API-Key header against the RAG_API_SECRET env var."""
+    expected_secret = os.getenv("RAG_API_SECRET")
+    if not expected_secret:
+        print("CRITICAL SECURITY WARNING: RAG_API_SECRET is not set.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server Auth Config Error"
+        )
+    if api_key != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid API Key"
+        )
+    return api_key
 
 # CORS Configuration
 app.add_middleware(
@@ -388,7 +408,7 @@ async def health_check():
     }
 
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(verify_api_key)])
 async def chat(request: ChatRequest):
     """
     Stateless Chat Endpoint

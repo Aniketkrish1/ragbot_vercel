@@ -5,7 +5,7 @@ python-multipart==0.0.20
 
 # LangChain & LLM
 langchain==0.3.7
-langchain-core==0.3.15
+langchain-core>=0.3.17
 langchain-groq==0.2.1
 langchain-huggingface==0.1.2
 langchain-community==0.3.7
@@ -22,5 +22,3 @@ requests>=2.31.0
 # Production Server
 gunicorn==21.2.0
 
-# Database
-appwrite==4.0.0
